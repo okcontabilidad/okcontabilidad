@@ -51,3 +51,22 @@
 		</header><!-- #masthead -->
 
 	<div id="content" class="site-content">
+		
+		<!-- Marcado JSON-LD generado por el Asistente para el marcado de datos estructurados de Google. -->
+<script type="application/ld+json">
+{
+  "@context" : "http://schema.org",
+  "@type" : "LocalBusiness",
+  "name" : "OK-CONTABILIDAD",
+  "telephone" : "0992420572",
+  "address" : {
+    "@type" : "PostalAddress",
+    "streetAddress" : "G. DIAZ DE PINEDA Y 6 DE NOVIEMBRE",
+    "addressLocality" : "SANTO DOMINGO DE LOS COLORADOS",
+    "addressRegion" : "SANTO DOMINGO DE LOS TSÁCHILAS",
+    "addressCountry" : "ECUADOR",
+    "postalCode" : "230103"
+  },
+  "url" : "https://ok-contabilidad.com/"
+}
+</script>
