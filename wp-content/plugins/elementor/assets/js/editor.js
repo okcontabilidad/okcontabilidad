@@ -1,4 +1,4 @@
-/*! elementor - v3.0.9 - 17-09-2020 */
+/*! elementor - v3.0.12 - 20-10-2020 */
 /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -9411,6 +9411,10 @@ ControlsCSSParser = elementorModules.ViewModule.extend({
 
       propertyName = propertyName.replace('_', '-');
       value = "var( --e-global-".concat(control.groupType, "-").concat(id, "-").concat(propertyName, " )");
+
+      if (elementor.config.ui.defaultGenericFonts && control.groupPrefix + 'font_family' === control.name) {
+        value += ", ".concat(elementor.config.ui.defaultGenericFonts);
+      }
     } else {
       value = "var( --e-global-".concat(control.type, "-").concat(id, " )");
     }
@@ -12492,6 +12496,7 @@ module.exports = elementorModules.ViewModule.extend({
       controlsCSS.stylesheet.empty();
     }
 
+    this.model.handleRepeaterData(this.model.attributes);
     controlsCSS.addStyleRules(this.model.getStyleControls(), this.model.attributes, this.model.controls, [/{{WRAPPER}}/g], [this.getSettings('cssWrapperSelector')]);
     controlsCSS.addStyleToDocument({
       // Ensures we don't override default global style
@@ -12614,10 +12619,6 @@ module.exports = elementorModules.ViewModule.extend({
   onElementorDocumentLoaded: function onElementorDocumentLoaded() {
     this.updateStylesheet();
     this.addPanelPage();
-
-    if (!elementor.userCan('design')) {
-      $e.route('panel/page-settings/settings');
-    }
   },
   destroy: function destroy() {
     this.unbindEvents();
@@ -14366,9 +14367,13 @@ ControlsStack = Marionette.CompositeView.extend({
     var sectionControls = self.collection.filter(function (controlModel) {
       return 'section' === controlModel.get('type') && self.isVisibleSectionControl(controlModel);
     });
+    var sectionToActivate;
 
     if (!sectionControls[0]) {
-      return;
+      self.activeSection = null;
+      sectionToActivate = null;
+    } else {
+      sectionToActivate = sectionControls[0].get('name');
     }
 
     var preActivatedSection = sectionControls.filter(function (controlModel) {
@@ -14379,7 +14384,7 @@ ControlsStack = Marionette.CompositeView.extend({
       return;
     }
 
-    self.activateSection(sectionControls[0].get('name'));
+    self.activateSection(sectionToActivate);
     return this;
   },
   getChildView: function getChildView(item) {
@@ -16863,8 +16868,7 @@ var EditorBase = /*#__PURE__*/function (_Marionette$Applicati) {
         el: document.$element[0],
         model: elementor.elementsModel
       });
-      preview.$el.empty();
-      preview.resetChildViewContainer(); // In order to force rendering of children
+      preview.$el.empty(); // In order to force rendering of children
 
       preview.isRendered = true;
 
@@ -17730,10 +17734,7 @@ var _default = /*#__PURE__*/function (_ControlBaseDataView) {
           $inputWrapper = jQuery('<div>', {
         class: 'e-global__confirm-input-wrapper'
       }),
-          $colorPreview = jQuery('<div>', {
-        class: 'e-global__color-preview',
-        style: 'background-color: ' + currentValue
-      }),
+          $colorPreview = this.createColorPreviewBox(currentValue),
           $input = jQuery('<input>', {
         type: 'text',
         name: 'global-name',
@@ -17773,10 +17774,7 @@ var _default = /*#__PURE__*/function (_ControlBaseDataView) {
         class: 'e-global__preview-item e-global__color',
         'data-global-id': globalData.id
       }),
-          $colorPreview = jQuery('<div>', {
-        class: 'e-global__color-preview',
-        style: 'background-color: ' + globalData.value
-      }),
+          $colorPreview = this.createColorPreviewBox(globalData.value),
           $colorTitle = jQuery('<span>', {
         class: 'e-global__color-title'
       }).html(globalData.title),
@@ -17785,6 +17783,22 @@ var _default = /*#__PURE__*/function (_ControlBaseDataView) {
       }).html(globalData.value);
       $color.append($colorPreview, $colorTitle, $colorHex);
       return $color;
+    }
+  }, {
+    key: "createColorPreviewBox",
+    value: function createColorPreviewBox(color) {
+      var $colorPreviewContainer = jQuery('<div>', {
+        class: 'e-global__color-preview-container'
+      }),
+          $colorPreviewColor = jQuery('<div>', {
+        class: 'e-global__color-preview-color',
+        style: 'background-color: ' + color
+      }),
+          $colorPreviewBg = jQuery('<div>', {
+        class: 'e-global__color-preview-transparent-bg'
+      });
+      $colorPreviewContainer.append($colorPreviewBg, $colorPreviewColor);
+      return $colorPreviewContainer;
     }
   }, {
     key: "getGlobalsList",
@@ -17819,12 +17833,9 @@ var _default = /*#__PURE__*/function (_ControlBaseDataView) {
 
   }, {
     key: "buildGlobalsList",
-    value: function buildGlobalsList(globalColors) {
+    value: function buildGlobalsList(globalColors, $globalPreviewItemsContainer) {
       var _this3 = this;
 
-      var $globalColorsPreviewContainer = jQuery('<div>', {
-        class: 'e-global__preview-items-container'
-      });
       (0, _values.default)(globalColors).forEach(function (color) {
         if (!color.value) {
           return;
@@ -17832,10 +17843,8 @@ var _default = /*#__PURE__*/function (_ControlBaseDataView) {
 
         var $color = _this3.createGlobalItemMarkup(color);
 
-        $globalColorsPreviewContainer.append($color);
+        $globalPreviewItemsContainer.append($color);
       });
-      this.ui.$globalColorsPreviewContainer = $globalColorsPreviewContainer;
-      return $globalColorsPreviewContainer;
     }
   }, {
     key: "onPickerChange",
@@ -17931,7 +17940,9 @@ module.exports = Marionette.Behavior.extend({
   renderTools: function renderTools() {
     var _this = this;
 
-    if (this.getOption('dynamicSettings').default) {
+    // If the user has Elementor Pro and the current control has no dynamic tags available, don't generate the dynamic switcher.
+    // If the user has the core version only, we do display the dynamic switcher for the promotion.
+    if (this.getOption('dynamicSettings').default || elementor.helpers.hasPro() && !this.getOption('tags').length) {
       return;
     }
 
@@ -25730,7 +25741,7 @@ var _default = /*#__PURE__*/function (_RepeaterRow) {
 
       if (isColor) {
         this.$colorValue = jQuery('<div>', {
-          class: 'e-global-colors__color-value'
+          class: 'e-global-colors__color-value elementor-control-unit-3'
         });
         childView.$el.find('.elementor-control-input-wrapper').prepend(this.getRemoveButton(), this.$colorValue);
         globalType = 'color';
@@ -25841,13 +25852,6 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }
 
   (0, _createClass2.default)(GlobalControlSelect, [{
-    key: "ui",
-    value: function ui() {
-      return {
-        controlContent: '.elementor-control-content'
-      };
-    }
-  }, {
     key: "getClassNames",
     value: function getClassNames() {
       return {
@@ -25872,11 +25876,15 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }, {
     key: "registerUiElements",
     value: function registerUiElements() {
+      var popoverWidget = this.popover.getElements('widget');
+      this.ui.manageGlobalsButton = popoverWidget.find(".".concat(this.getClassNames().manageButton));
+    }
+  }, {
+    key: "registerPreviewElements",
+    value: function registerPreviewElements() {
       var popoverWidget = this.popover.getElements('widget'),
           classes = this.getClassNames();
-      this.ui.globalPreviewsContainer = popoverWidget.find(".".concat(classes.previewItemsContainer));
       this.ui.globalPreviewItems = popoverWidget.find(".".concat(classes.previewItem));
-      this.ui.manageGlobalsButton = popoverWidget.find(".".concat(classes.manageButton));
     } // This method exists because the UI elements are printed after controls are already rendered.
 
   }, {
@@ -25884,10 +25892,6 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
     value: function registerEvents() {
       var _this = this;
 
-      var classes = this.getClassNames();
-      this.ui.globalPreviewsContainer.on('click', ".".concat(classes.previewItem), function (event) {
-        return _this.applySavedGlobalValue(event.currentTarget.dataset.globalId);
-      });
       this.ui.globalPopoverToggle.on('click', function (event) {
         return _this.toggleGlobalPopover(event);
       });
@@ -25907,18 +25911,27 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
       });
     }
   }, {
-    key: "fetchGlobalValue",
-    value: function fetchGlobalValue() {
+    key: "addPreviewItemsClickListener",
+    value: function addPreviewItemsClickListener() {
       var _this2 = this;
 
-      return $e.data.get(this.view.getGlobalKey()).then(function (globalData) {
-        _this2.view.globalValue = globalData.data.value;
+      this.ui.$globalPreviewItemsContainer.on('click', ".".concat(this.getClassNames().previewItem), function (event) {
+        return _this2.applySavedGlobalValue(event.currentTarget.dataset.globalId);
+      });
+    }
+  }, {
+    key: "fetchGlobalValue",
+    value: function fetchGlobalValue() {
+      var _this3 = this;
 
-        _this2.onValueTypeChange();
+      return $e.data.get(this.view.getGlobalKey()).then(function (globalData) {
+        _this3.view.globalValue = globalData.data.value;
+
+        _this3.onValueTypeChange();
 
         elementor.kitManager.renderGlobalVariables();
 
-        _this2.view.applySavedValue();
+        _this3.view.applySavedValue();
 
         return globalData.data;
       });
@@ -25988,7 +26001,7 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }, {
     key: "updateCurrentGlobalName",
     value: function updateCurrentGlobalName(value) {
-      var _this3 = this;
+      var _this4 = this;
 
       var classes = this.getClassNames();
       var globalTooltipText = '';
@@ -26016,7 +26029,7 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
               text = elementor.translate('default');
             }
 
-            _this3.updateCurrentGlobalName(text);
+            _this4.updateCurrentGlobalName(text);
           });
           this.ui.globalPopoverToggle.addClass(classes.popoverToggleActive);
           return;
@@ -26040,7 +26053,7 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }, {
     key: "onRender",
     value: function onRender() {
-      var _this4 = this;
+      var _this5 = this;
 
       this.printGlobalToggleButton();
       this.initGlobalPopover();
@@ -26048,7 +26061,7 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
       if (this.view.getGlobalKey()) {
         // This setTimeout is here to overcome an issue with a requestAnimationFrame that runs in the Pickr library.
         setTimeout(function () {
-          return _this4.fetchGlobalValue();
+          return _this5.fetchGlobalValue();
         }, 50);
       } else {
         this.onValueTypeChange();
@@ -26059,17 +26072,35 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }, {
     key: "toggleGlobalPopover",
     value: function toggleGlobalPopover() {
+      var _this6 = this;
+
       if (this.popover.isVisible()) {
         this.popover.hide();
       } else {
-        this.popover.show();
-        this.setCurrentActivePreviewItem();
+        if (this.ui.$globalPreviewItemsContainer) {
+          // This element is not defined when the controls popover is first loaded.
+          this.ui.$globalPreviewItemsContainer.remove();
+        }
+
+        this.view.getGlobalsList().then(function (globalsList) {
+          // We just deleted the existing list of global preview items, so we need to rebuild it
+          // with the updated list of globals, register the elements and re-add the on click listeners.
+          _this6.addGlobalsListToPopover(globalsList);
+
+          _this6.registerPreviewElements();
+
+          _this6.addPreviewItemsClickListener();
+
+          _this6.popover.show();
+
+          _this6.setCurrentActivePreviewItem();
+        });
       }
     }
   }, {
     key: "buildGlobalPopover",
     value: function buildGlobalPopover() {
-      var _this5 = this;
+      var _this7 = this;
 
       var classes = this.getClassNames(),
           $popover = jQuery('<div>', {
@@ -26086,7 +26117,7 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
       this.manageButtonTooltipText = this.getOption('manageButtonText');
       $manageGlobalsLink.tipsy({
         title: function title() {
-          return _this5.manageButtonTooltipText;
+          return _this7.manageButtonTooltipText;
         },
         offset: 3,
         gravity: function gravity() {
@@ -26098,34 +26129,38 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }, {
     key: "printGlobalToggleButton",
     value: function printGlobalToggleButton() {
-      var _this6 = this;
+      var _this8 = this;
 
       var $globalToggleButton = jQuery('<div>', {
         class: this.getClassNames().popoverToggle + ' elementor-control-unit-1'
       }),
           $globalPopoverToggleIcon = jQuery('<i>', {
         class: 'eicon-globe'
-      });
+      }),
+          $globalsLoadingSpinner = jQuery('<span>', {
+        class: 'elementor-control-spinner'
+      }).html('<i class="eicon-spinner eicon-animation-spin"></i></span>');
       $globalToggleButton.append($globalPopoverToggleIcon);
       this.$el.find('.elementor-control-input-wrapper').prepend($globalToggleButton);
       this.ui.globalPopoverToggle = $globalToggleButton;
-      this.ui.globalPopoverToggleIcon = $globalPopoverToggleIcon; // Add tooltip to the Global Popover toggle button, displaying the current Global Name / 'Default' / 'Custom'.
+      this.ui.globalPopoverToggleIcon = $globalPopoverToggleIcon;
+      this.ui.$globalsLoadingSpinner = $globalsLoadingSpinner; // Add tooltip to the Global Popover toggle button, displaying the current Global Name / 'Default' / 'Custom'.
 
       this.ui.globalPopoverToggleIcon.tipsy({
         title: function title() {
-          return _this6.globalName;
+          return _this8.globalName;
         },
         offset: 7,
         gravity: function gravity() {
           return 's';
         }
       });
+      $globalToggleButton.before($globalsLoadingSpinner);
+      this.ui.$globalsLoadingSpinner.hide();
     }
   }, {
     key: "initGlobalPopover",
     value: function initGlobalPopover() {
-      var _this7 = this;
-
       this.popover = elementorCommon.dialogsManager.createWidget('simple', {
         className: this.getClassNames().popover,
         message: this.buildGlobalPopover(),
@@ -26137,25 +26172,27 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
           onOutsideClick: false
         },
         position: {
-          my: "center top",
-          at: "center bottom+5",
-          of: this.ui.controlContent,
+          my: "right top",
+          at: "right bottom+5",
+          of: this.ui.globalPopoverToggle,
+          collision: 'fit flip',
           autoRefresh: true
         }
-      }); // Render the list of globals and append them to the Globals popover.
+      }); // Add Popover elements to the this.ui object and register click events.
 
-      this.view.getGlobalsList().then(function (globalsList) {
-        _this7.addGlobalsListToPopover(globalsList);
-
-        _this7.registerUiElementsAndEvents();
-      });
+      this.registerUiElementsAndEvents();
       this.createGlobalInfoTooltip();
     }
   }, {
     key: "addGlobalsListToPopover",
     value: function addGlobalsListToPopover(globalsList) {
-      var $globalsList = this.view.buildGlobalsList(globalsList);
-      this.popover.getElements('widget').find(".".concat(this.getClassNames().globalPopoverTitle)).after($globalsList);
+      var $globalPreviewItemsContainer = jQuery('<div>', {
+        class: 'e-global__preview-items-container'
+      });
+      this.view.buildGlobalsList(globalsList, $globalPreviewItemsContainer);
+      this.popover.getElements('widget').find(".".concat(this.getClassNames().globalPopoverTitle)).after($globalPreviewItemsContainer); // The populated list is nested under the previews container element.
+
+      this.ui.$globalPreviewItemsContainer = $globalPreviewItemsContainer;
     }
   }, {
     key: "registerUiElementsAndEvents",
@@ -26170,7 +26207,7 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }, {
     key: "onAddGlobalToList",
     value: function onAddGlobalToList($confirmMessage) {
-      var _this8 = this;
+      var _this9 = this;
 
       var classes = this.getClassNames();
       this.confirmNewGlobalModal = elementorCommon.dialogsManager.createWidget('confirm', {
@@ -26185,17 +26222,17 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
           onBackgroundClick: false
         },
         onConfirm: function onConfirm() {
-          return _this8.onConfirmNewGlobal();
+          return _this9.onConfirmNewGlobal();
         },
         onShow: function onShow() {
           // Put focus on the naming input.
-          var modalWidget = _this8.confirmNewGlobalModal.getElements('widget');
+          var modalWidget = _this9.confirmNewGlobalModal.getElements('widget');
 
-          _this8.ui.globalNameInput = modalWidget.find('input').focus();
-          _this8.ui.confirmMessageText = modalWidget.find(classes.confirmMessageText);
+          _this9.ui.globalNameInput = modalWidget.find('input').focus();
+          _this9.ui.confirmMessageText = modalWidget.find(classes.confirmMessageText);
 
-          _this8.ui.globalNameInput.on('input', function () {
-            return _this8.onAddGlobalConfirmInputChange();
+          _this9.ui.globalNameInput.on('input', function () {
+            return _this9.onAddGlobalConfirmInputChange();
           });
         }
       });
@@ -26226,22 +26263,17 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
   }, {
     key: "onConfirmNewGlobal",
     value: function onConfirmNewGlobal() {
-      var _this9 = this;
-
       var globalMeta = this.view.getGlobalMeta();
       globalMeta.title = this.ui.globalNameInput.val();
-      this.createNewGlobal(globalMeta).then(function (result) {
-        var $globalPreview = _this9.view.createGlobalItemMarkup(result.data);
-
-        _this9.ui.globalPreviewsContainer.append($globalPreview);
-      });
+      this.createNewGlobal(globalMeta);
     }
   }, {
     key: "createNewGlobal",
     value: function createNewGlobal(globalMeta) {
       var _this10 = this;
 
-      return $e.run(globalMeta.commandName + '/create', {
+      this.ui.$globalsLoadingSpinner.show();
+      $e.run(globalMeta.commandName + '/create', {
         container: this.view.container,
         setting: globalMeta.key,
         // group control name
@@ -26249,7 +26281,7 @@ var GlobalControlSelect = /*#__PURE__*/function (_Marionette$Behavior) {
       }).then(function (result) {
         _this10.applySavedGlobalValue(result.data.id);
 
-        return result;
+        _this10.ui.$globalsLoadingSpinner.hide();
       });
     }
   }, {
@@ -27815,23 +27847,13 @@ var _helper = _interopRequireDefault(__webpack_require__(215));
 var BaseSectionsContainerView = __webpack_require__(528);
 
 var Preview = BaseSectionsContainerView.extend({
+  initialize: function initialize() {
+    this.$childViewContainer = jQuery('<div>', {
+      class: 'elementor-section-wrap'
+    });
+    BaseSectionsContainerView.prototype.initialize.apply(this, arguments);
+  },
   getChildViewContainer: function getChildViewContainer() {
-    if (!this.$childViewContainer) {
-      this.$childViewContainer = jQuery('<div>', {
-        class: 'elementor-section-wrap'
-      });
-
-      if (elementor.config.legacyMode.elementWrappers) {
-        var inner = jQuery('<div>', {
-          class: 'elementor-inner'
-        });
-        inner.append(this.$childViewContainer);
-        this.$el.prepend(inner);
-      } else {
-        this.$el.prepend(this.$childViewContainer);
-      }
-    }
-
     return this.$childViewContainer;
   },
   behaviors: function behaviors() {
@@ -27899,13 +27921,25 @@ var Preview = BaseSectionsContainerView.extend({
     }];
   },
   onRender: function onRender() {
-    if (!elementor.userCan('design')) {
-      return;
+    var $contentContainer;
+
+    if (elementor.config.legacyMode.elementWrappers) {
+      var $inner = jQuery('<div>', {
+        class: 'elementor-inner'
+      });
+      this.$el.html($inner);
+      $contentContainer = $inner;
+    } else {
+      $contentContainer = this.$el;
     }
 
-    var addNewSectionView = new _independent.default();
-    addNewSectionView.render();
-    this.$el.append(addNewSectionView.$el);
+    $contentContainer.html(this.$childViewContainer);
+
+    if (elementor.userCan('design')) {
+      var addNewSectionView = new _independent.default();
+      addNewSectionView.render();
+      $contentContainer.append(addNewSectionView.$el);
+    }
   }
 });
 module.exports = Preview;
@@ -28347,21 +28381,17 @@ var ControlPopoverStarterView = /*#__PURE__*/function (_ControlChooseView) {
     }()
   }, {
     key: "buildGlobalsList",
-    value: function buildGlobalsList(globalTypographies) {
+    value: function buildGlobalsList(globalTypographies, $globalPreviewItemsContainer) {
       var _this = this;
 
-      var $globalTypographyContainer = jQuery('<div>', {
-        class: 'e-global__preview-items-container'
-      });
       (0, _values.default)(globalTypographies).forEach(function (typography) {
         // Only build markup if the typography is valid.
         if (typography) {
           var $typographyPreview = _this.createGlobalItemMarkup(typography);
 
-          $globalTypographyContainer.append($typographyPreview);
+          $globalPreviewItemsContainer.append($typographyPreview);
         }
       });
-      return $globalTypographyContainer;
     }
   }, {
     key: "onAddGlobalButtonClick",
@@ -32607,12 +32637,16 @@ ControlMediaItemView = ControlMultipleBaseItemView.extend({
 
     this.ui.controlMedia.toggleClass('elementor-media-empty', !url);
   },
-  openFrame: function openFrame() {
-    var _this = this;
+  openFrame: function openFrame(e) {
+    var _e$target,
+        _e$target$dataset,
+        _this = this;
 
-    if (!_filesUploadHandler.default.isUploadEnabled(this.getMediaType())) {
+    var mediaType = (e === null || e === void 0 ? void 0 : (_e$target = e.target) === null || _e$target === void 0 ? void 0 : (_e$target$dataset = _e$target.dataset) === null || _e$target$dataset === void 0 ? void 0 : _e$target$dataset.mediaType) || this.getMediaType();
+
+    if (!_filesUploadHandler.default.isUploadEnabled(mediaType)) {
       _filesUploadHandler.default.getUnfilteredFilesNotEnabledDialog(function () {
-        return _this.openFrame();
+        return _this.openFrame(e);
       }).show();
 
       return false;
